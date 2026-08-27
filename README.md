@@ -4,14 +4,14 @@ CLARITY FROM UNCERTAINTY
 
 ## 项目简介
 
-Z-quantization 是基于 Z-quantization 设计文档 V5.0 第十章「前端UI设计」生成的量化投研平台前端界面。
+Z-quantization 是基于 Z-quantization 设计文档 V5.0 第十章「前端 UI 设计」生成的量化投研平台前端界面。
 
 ### 功能特性
 
 - **资金层次总览**：百万级 / 十万级 / 万级 / 千元级 / 百元级 / 十元级 六个层级
 - **智能体管理**：50 个智能体，ID 可点击，行点击展开详情
 - **股票因子 + 基金因子**：多因子组合策略展示
-- **深色专业配色**：`#0D1117` 背景，红涨绿跌（A股惯例）
+- **深色专业配色**：`#0D1117` 背景，红涨绿跌（A 股惯例）
 
 ### 技术栈
 
@@ -26,16 +26,17 @@ Z-quantization 是基于 Z-quantization 设计文档 V5.0 第十章「前端UI�
 - 源码仓库：https://github.com/Mask0866/z-quantization
 
 ### Cloudflare Pages
-- 生产环境：https://8bf5fd71.z-quantization.pages.dev/ui-v5.html
+- 生产环境：https://z-quantization.pages.dev/ui-v5
+- 自定义域名：https://luo798.ccwu.cc/ui-v5（待 DNS 传播）
 - D1 数据库：`z-quantization-db`（已创建）
 
 ## 本地运行
 
 ```bash
-# 方法1：使用 Python HTTP 服务器
+# 方法 1：使用 Python HTTP 服务器
 python -m http.server 8080 --directory frontend
 
-# 方法2：使用 Node.js
+# 方法 2：使用 Node.js
 npx serve frontend
 ```
 
