@@ -17,7 +17,6 @@
 <script src="https://registry.npmmirror.com/echarts/5.4.3/files/dist/echarts.min.js"></script>
 <script>window.echarts||document.write('<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"><\/script>');</script>
 <script src="/api-client.js"></script>
-<script src="/data-sync.js"></script>
 <style>
 :root{
   --bg:#0D1117; --panel:#161B22; --border:#30363D; --border2:#3A414B;
