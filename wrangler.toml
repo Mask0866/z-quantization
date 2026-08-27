@@ -1,0 +1,8 @@
+name = "z-quantization"
+pages_build_output_dir = "frontend"
+compatibility_date = "2024-01-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "z-quantization-db"
+database_id = "85bb49b5-fbf7-4bdf-8abd-d7346e07ceae"
