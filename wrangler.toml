@@ -13,6 +13,8 @@ database_id = "85bb49b5-fbf7-4bdf-8abd-d7346e07ceae"
 CUSTOM_DOMAIN = "luo798.ccwu.cc"
 API_VERSION = "v1"
 
-# 定时爬取触发器（与设计文档调度一致：05:00 系统清理 / 15:30 收盘后 / 18:30 净值公布后）
-[triggers]
-crons = ["0 5 * * *", "30 15 * * *", "30 18 * * *"]
+# 注意：Pages 项目不支持 wrangler.toml [triggers]（cron 需在 Pages Dashboard
+# "Settings > Functions > Cron Triggers" 配置，或调用 Cloudflare API）：
+#   PUT /accounts/{account_id}/pages/projects/z-quantization
+#   {"deployment_configs":{...}} 或 /crons 端点
+# 定时表达式：0 5 * * *（05:00 系统清理）/ 30 15 * * *（15:30 收盘后）/ 30 18 * * *（18:30 净值公布）
