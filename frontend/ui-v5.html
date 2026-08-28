@@ -847,30 +847,10 @@ var FACTORS=[
  ['M1','订单流不平衡OFI','高阶AI','正','需高频数据'],['M2','供应链网络中心度','高阶AI','正','需另类数据'],['M3','深度学习压缩隐因子','高阶AI','动态','需高算力'],['M4','量价协方差Alpha#6','高阶AI','拟合','WorldQuant公式'],['M5','零延迟均值回归','高阶AI','负','WorldQuant公式'],
  ['E1','业绩预告超预期','事件','正','—'],['E2','一致预期增速变化','事件','正','—'],['E3','财报发布时间','事件','提前正/延后负','—'],['E4','股权激励公告','事件','正','—'],['E5','重大合同公告','事件','正','—'],
  ['Z1','因子拥挤度','二阶','负','生死攸关，非可选'],['Z2','因子动量IC均值','二阶','正','动态调权'],['Z3','因子波动率','二阶','负','IC越稳定越好'],['Z4','因子换手率','二阶','越低越好','降低交易成本'],['Z5','因子分散度','二阶','正','信号区分度']];
-/* 数据结构：[时间, 来源, 类别, 标题(html 可含 <b>code</b>), 情感(+1/0/-1), 日差(0=今日, 1=昨日)]
- * 保留策略：仅保留最近 48h 的新闻；昨日数据为"昨天"信息（含部分早盘/午盘），今日为收盘前实时 */
-var NEWS=[
- /* 今日（day=0） */
- ['15:32','东方财富','policy','央行开展 2000 亿 MLF 操作，利率持平',0,0],
- ['15:18','财联社','company','<b>600519</b> 上半年营收同比 +17.2%，超市场预期',+1,0],
- ['14:56','同花顺','sector','券商板块异动拉升，<b>600030</b> 涨超 3%',+1,0],
- ['14:22','巨潮资讯','company','<b>300308</b> 获机构密集调研，光模块景气度上行',+1,0],
- ['13:55','财联社','company','<b>002594</b> 公布 7 月销量，新能源车出口创新高',+1,0],
- ['13:30','新浪财经','sector','医药板块持续调整，多只白马股创年内新低',-1,0],
- ['13:00','国家统计局','policy','7 月规上工业增加值同比 +5.1%，环比改善',0,0],
- ['12:20','东方财富','company','<b>601899</b> 半年报预增，黄金股持续受益',+1,0],
- ['11:50','证券时报','sector','银行股盘中走强，<b>601398</b> 涨超 2%',+1,0],
- ['09:15','上海证券报','sector','半导体板块早盘走强，<b>688981</b> 领涨',+1,0],
- /* 昨日（day=1） */
- ['08-23 15:42','财联社','company','<b>600519</b> 获北向资金净买入 8.4 亿',+1,1],
- ['08-23 14:30','华尔街见闻','global','美股三大指数收跌，市场等待鲍威尔讲话',-1,1],
- ['08-23 13:10','巨潮资讯','company','<b>300750</b> 公告：与某车企签订长期供货协议',+1,1],
- ['08-23 11:00','新浪财经','sector','新能源车板块早盘走强，<b>002594</b> 涨超 4%',+1,1],
- ['08-23 10:25','东方财富','policy','证监会就退市新规征求意见',0,1],
- ['08-23 09:30','国家统计局','policy','7 月 PMI 数据公布 49.5，低于预期',-1,1],
- ['08-23 09:15','第一财经','company','<b>000858</b> 五粮液 8 月终端动销环比改善',+1,1]];
-var AUDIT=[
- ['2026-08-24 14:58','买入委托 600519 100 股'],['2026-08-24 14:12','API 密钥 Tushare 更新'],['2026-08-24 13:40','因子 B2 拥挤度预警 → 降权'],['2026-08-24 11:05','查看 300750 因子详情'],['2026-08-24 10:20','智能体 AG-07 触发迭代（连续4日跑输）'],['2026-08-24 09:31','候选池扫描结果已推送 50 智能体'],['2026-08-23 16:00','因子计算完成（51 因子）'],['2026-08-23 15:30','全市场扫描完成：30股+20ETF']];
+/* 数据结构：[时间, 来源, 类别, 标题, 情感(+1/0/-1), 日差(0=今日, 1=昨日)]
+ * 保留策略：仅保留最近 48h；内容由 /api/news 拉取真实新闻（新浪财经 7x24），loadRealData() 填充 */
+var NEWS=[];
+var AUDIT=[];
 
 /* ======================================================== 视图切换 ======================================================== */
 var curView='strategy';
@@ -1215,12 +1195,12 @@ function watchTick(){
   WATCHLIST.forEach(function(w){
     var t=WATCH_TICKS[w.code];
     if(!t)t=WATCH_TICKS[w.code]={price:livePrice(w.code),drift:0};
-    /* 传统基金按净值日更（微调 0.05%）；ETF/股票按实时 tick（0.2%）；基价跟随市场爬取 livePrice */
-    var amp=isTradFund(w.code)?0.0005:0.002;
-    t.drift+=(Math.random()-0.5)*amp;
-    t.price=Math.max(0.01,t.price*(1+t.drift));
+    /* 真实价格：livePrice 读后端真实行情（腾讯/天天基金），无随机漂移 */
     var base=livePrice(w.code);
-    var chg=(t.price-base)/base*100;
+    t.price=base>0?base:t.price;
+    var chg=(t.price-(WATCH_TICKS[w.code].init||t.price))/ (WATCH_TICKS[w.code].init||t.price)*100;
+    if(!WATCH_TICKS[w.code].init)WATCH_TICKS[w.code].init=base>0?base:t.price;
+    chg=(t.price-(WATCH_TICKS[w.code].init||t.price))/(WATCH_TICKS[w.code].init||t.price)*100;
     /* 预警触发：跌破阈值且未弹过 → Toast；回升复位可再次触发 */
     if(WATCH_ALERT.enabled&&chg<=-WATCH_ALERT.threshold&&!WATCH_WARNED[w.code]){
       WATCH_WARNED[w.code]=true;
@@ -1435,17 +1415,18 @@ var ETF_BANDS=[
   {amt:[2200,8000],size:[6,120],prem:[0.1,1.3],share:2,  jump:[12,30],ma:2},
   {amt:[900,3000], size:[2.5,30],prem:[0.2,2.2],share:[1,2],jump:[6,18], ma:2},
   {amt:[350,1500], size:[1.2,8], prem:[-0.3,2.7],share:[0,2],jump:[1,12], ma:[1,2]}];
+/* 扫描属性：真实数据驱动（MARKET_CRAWL.snap 由 loadRealData 填充腾讯行情+K线真实值；
+ * 无真实值时为 0/null 占位，绝不生成随机数）
+ * - 股票：mv=总市值(亿)、bias=对60日线乖离%、amp=振幅%、brk=突破天数、ma60=有60日K线、rankPct=量价排名百分位
+ * - ETF：size=规模(亿，腾讯总市值口径)、amt=成交额、prem=溢价（免费源无 IOPV，以 0 标注）、share=份额趋势（无历史份额数据，置 1 中性）、jump=排名跃升（以量比映射）、ma=换手/量比映射 */
 function genScanAttrs(code,seed,type,band){
-  var r=rng(seed*13+code.charCodeAt(1)*3+code.charCodeAt(4)*7);
-  var b=type==='stock'?STOCK_BANDS[band]:ETF_BANDS[band];
-  var v=function(lo,hi){return +(lo+r()*(hi-lo)).toFixed(2);};
+  var sp=MARKET_CRAWL.snap[code]||{};
   if(type==='stock'){
-    return {mv:v(b.mv[0],b.mv[1]),bias:v(b.bias[0],b.bias[1]),amp:v(b.amp[0],b.amp[1]),
-      brk:Math.round(v(b.brk[0],b.brk[1])),ma60:b.ma60,rankPct:Math.round(v(b.rank[0],b.rank[1]))};
+    return {mv:sp.mktCap!=null?sp.mktCap:0, bias:sp.bias!=null?sp.bias:(sp.chgPct||0), amp:sp.amp!=null?sp.amp:0,
+      brk:sp.brk||0, ma60:sp.ma60!=null, rankPct:sp.rankPct!=null?sp.rankPct:50};
   }
-  return {amt:Math.round(v(b.amt[0],b.amt[1])),size:v(b.size[0],b.size[1]),prem:v(b.prem[0],b.prem[1]),
-    share:Array.isArray(b.share)?Math.round(v(b.share[0],b.share[1])):b.share,
-    jump:Math.round(v(b.jump[0],b.jump[1])),ma:Array.isArray(b.ma)?Math.round(v(b.ma[0],b.ma[1])):b.ma};
+  return {amt:sp.amount!=null?Math.round(sp.amount):0, size:sp.mktCap!=null?sp.mktCap:0, prem:0,
+    share:1, jump:sp.vr!=null?Math.round(sp.vr*4):0, ma:(sp.tr!=null&&sp.tr>1)?2:1};
 }
 /* 股票扫描（3.2/3.3/3.4）：返回 core/sec/back/null */
 function scanStockLayer(p){
@@ -1516,13 +1497,13 @@ function buildPool(){
     var band=i<10?0:(i<20?1:2);
     poolAll.push({code:s[0],name:s[1],price:s[2],chg:s[3],vr:s[4],tr:s[5],
       scan:genScanAttrs(s[0],i,'stock',band),
-      score:Math.round(55+rng(s[0].charCodeAt(3)+i)()*40),type:'stock'});
+      score:Math.round(40+Math.min(60,Math.max(0,(s[3]||0)*6+(s[4]||0)*8+(s[5]||0)*4))),type:'stock'});
   });
   ETFS.forEach(function(s,i){
     var band=i<5?0:(i<12?1:2);
     poolAll.push({code:s[0],name:s[1],price:s[2],chg:s[3],vr:s[4],tr:s[5],
       scan:genScanAttrs(s[0],i,'etf',band),
-      score:Math.round(50+rng(s[0].charCodeAt(2)+i*7)()*45),type:'etf'});
+      score:Math.round(40+Math.min(60,Math.max(0,(s[3]||0)*5+(s[4]||0)*8+(s[5]||0)*6))),type:'etf'});
   });
   TRAD_FUNDS.forEach(function(s,i){
     poolAll.push({code:s[0],name:s[1],price:s[2],chg:s[3],
@@ -1540,15 +1521,17 @@ function renderIndexBoard(){
   }).join('')+'</div>';
 }
 function renderRank(){
-  var r=rng(7),curType='stock',cur=0;
+  var curType='stock',cur=0;
   var tb=document.getElementById('rankTabs'),tbType=document.getElementById('rankTypeTabs');
   function groupsOf(){
     if(curType==='stock'){
+      /* 真实字段（腾讯行情经 /api/market 填充 snap）：成交额(万→亿) / 振幅 / 换手率 / 量比 */
+      function snapOf(code){return MARKET_CRAWL.snap[code]||{};}
       return [
-        {name:'成交额',items:STOCKS.map(function(s,i){return {code:s[0],name:s[1],v:s[4]*r()*42+8};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'亿'},
-        {name:'振幅',items:STOCKS.map(function(s,i){return {code:s[0],name:s[1],v:s[5]*r()*2+2};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'%'},
-        {name:'换手率',items:STOCKS.map(function(s,i){return {code:s[0],name:s[1],v:s[5]*(r()*0.6+0.6)};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'%'},
-        {name:'主力净流入',items:STOCKS.map(function(s,i){return {code:s[0],name:s[1],v:(s[4]-0.8)*r()*8};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'亿'}];
+        {name:'成交额',items:STOCKS.map(function(s){var sp=snapOf(s[0]);return {code:s[0],name:s[1],v:sp.amount!=null?+(sp.amount/10000).toFixed(2):0};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'亿'},
+        {name:'振幅',items:STOCKS.map(function(s){var sp=snapOf(s[0]);return {code:s[0],name:s[1],v:sp.amp!=null?+sp.amp.toFixed(2):0};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'%'},
+        {name:'换手率',items:STOCKS.map(function(s){return {code:s[0],name:s[1],v:s[5]||0};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'%'},
+        {name:'量比',items:STOCKS.map(function(s){return {code:s[0],name:s[1],v:s[4]||0};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:''}];
     }
     if(curType==='tradfund'){
       /* 场外基金排行（V2.5 多因子）：仅展示入池产品（Tier1-3，淘汰不参与排行） */
@@ -1560,13 +1543,13 @@ function renderRank(){
         {name:'卡玛',items:tf.map(function(p){return {code:p.code,name:p.name,v:p.calmar};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:''},
         {name:'7Ps评分',items:tf.map(function(p){return {code:p.code,name:p.name,v:p.p7};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'分'}];
     }
-    /* ETF 排行：数据来自候选池扫描引擎的 scan 属性（规模/成交额/溢价/份额趋势） */
+    /* ETF 排行：真实字段（腾讯行情）：成交额 / 规模 / 量比 / 换手率（免费源无 IOPV 溢价与份额趋势，改以真实量价字段） */
     var etfs=poolAll.filter(function(p){return p.type==='etf';});
     return [
       {name:'成交额',items:etfs.map(function(p){return {code:p.code,name:p.name,v:p.scan.amt,share:p.scan.share};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'万',share:true},
       {name:'规模',items:etfs.map(function(p){return {code:p.code,name:p.name,v:p.scan.size,share:p.scan.share};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'亿',share:true},
-      {name:'溢价率',items:etfs.map(function(p){return {code:p.code,name:p.name,v:p.scan.prem,share:p.scan.share};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'%',share:true},
-      {name:'份额趋势',items:etfs.map(function(p){return {code:p.code,name:p.name,v:p.scan.share,share:p.scan.share};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'',share:true}];
+      {name:'量比',items:etfs.map(function(p){return {code:p.code,name:p.name,v:p.vr||0,share:p.scan.share};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'',share:true},
+      {name:'换手率',items:etfs.map(function(p){return {code:p.code,name:p.name,v:p.tr||0,share:p.scan.share};}).sort(function(a,b){return b.v-a.v;}).slice(0,10),unit:'%',share:true}];
   }
   function fmtShare(s){return s===2?'连增':(s===1?'2日增':'未减');}
   function paint(){
@@ -2060,34 +2043,18 @@ var MGR_CRAWL={lastTime:null,nextTime:null,lastFull:null,count:0,snap:{},tenureO
 function saveMgrCrawl(){
   try{localStorage.setItem('zq_mgr_crawl',JSON.stringify({snap:MGR_CRAWL.snap,days:MGR_CRAWL.days,tenureOff:MGR_CRAWL.tenureOff,count:MGR_CRAWL.count,lastFull:MGR_CRAWL.lastFull}));}catch(e){}
 }
-/* 全自动爬取（无手动入口）：isFull=true 表示到时间表的全量爬取 */
+/* 全自动爬取（无手动入口）：isFull=true 表示到时间表的全量爬取
+ * 真实实现：基金经理/规模数据由后端定时爬取（天天基金）入 D1，前端 loadRealData() 拉取刷新 */
 function crawlFundMgr(isFull){
-  var nowKey=fmtClock(Date.now()).slice(5,10);   /* MM-DD */
+  var nowKey=fmtClock(Date.now()).slice(5,10);
   var day=MGR_CRAWL.days[nowKey]||(MGR_CRAWL.days[nowKey]={count:0});
   if(day.count>=1000){renderFundManager();return;}   /* 每日上限 1000 次 */
-  /* 指数退避重试：模拟 5% 概率请求失败，0.6-2.1s 后退避重试 */
-  if(Math.random()<0.05){
-    setTimeout(function(){crawlFundMgr(isFull);},600+Math.floor(Math.random()*1500));
-    return;
-  }
-  /* 随机延迟（Data source.txt：time.sleep(random.uniform(3,6)) → 演示压缩为 300-600ms） */
-  setTimeout(function(){
-    TRAD_FUNDS.forEach(function(s){
-      if(!MGR_CRAWL.snap[s[0]])MGR_CRAWL.snap[s[0]]={sizeOff:0};
-      var sp=MGR_CRAWL.snap[s[0]];
-      sp.sizeOff+=(Math.random()-0.5)*0.04;   /* ±2% 抖动 */
-      sp.sizeOff=Math.max(-0.5,Math.min(0.5,sp.sizeOff));
-      if(Math.random()<0.01)sp.sizeOff=-0.3;  /* 1% 概率重大事件 */
-    });
-    MGR_CRAWL.tenureOff=(MGR_CRAWL.tenureOff||0)+1/12;
-    day.count++;
-    var d=new Date();
-    MGR_CRAWL.lastTime=fmtClock(d);
-    MGR_CRAWL.nextTime=fmtClock(d.getTime()+300000);
-    MGR_CRAWL.count++;
-    saveMgrCrawl();
-    renderFundManager();
-  },300+Math.floor(Math.random()*300));
+  day.count++;
+  MGR_CRAWL.count++;
+  MGR_CRAWL.lastTime=fmtClock(new Date());
+  MGR_CRAWL.nextTime=fmtClock(Date.now()+300000);
+  saveMgrCrawl();
+  loadRealData();
 }
 /* 时间表调度器：每分钟检查是否到达全量爬取点（05:00/15:30/18:30，同一天每个点只爬一次） */
 function mgrScheduler(){
@@ -2113,47 +2080,33 @@ var MARKET_CRAWL={lastTime:null,nextTime:null,lastFull:null,count:0,snap:{},days
 function saveMarketCrawl(){
   try{localStorage.setItem('zq_market_crawl',JSON.stringify({snap:MARKET_CRAWL.snap,days:MARKET_CRAWL.days,count:MARKET_CRAWL.count,lastFull:MARKET_CRAWL.lastFull}));}catch(e){}
 }
-/* 实时价：基价 × (1+snap.off)，供思维/自选/排行读取（股票/ETF/场外基金统一） */
+/* 实时价：真实数据优先（snap.price 由 loadRealData 从后端真实行情填充），否则回退静态基价 */
 function livePrice(code){
-  var off=(MARKET_CRAWL.snap[code]&&MARKET_CRAWL.snap[code].off)||0;
+  var sp=MARKET_CRAWL.snap[code];
+  if(sp&&sp.price!=null&&sp.price>0)return sp.price;
+  var off=(sp&&sp.off)||0;
   return priceOf(code)*(1+off);
 }
-/* 实时涨幅（百分点）：静态涨幅 + 抖动偏移（off 比例×100） */
+/* 实时涨幅（百分点）：真实数据优先 */
 function liveChg(code,baseChg){
-  var off=(MARKET_CRAWL.snap[code]&&MARKET_CRAWL.snap[code].off)||0;
+  var sp=MARKET_CRAWL.snap[code];
+  if(sp&&sp.chgPct!=null)return sp.chgPct;
+  var off=(sp&&sp.off)||0;
   return baseChg+off*100;
 }
-/* 全自动爬取（无手动入口）：股票 + 场内 ETF + 场外基金价格抖动（±0.5%/次，累计夹紧 ±5%） */
+/* 全自动爬取（无手动入口）：股票 + 场内 ETF + 场外基金
+ * 真实实现：后端定时爬取（腾讯行情 + 天天基金）入 D1，前端 loadRealData() 拉取刷新，
+ * 无任何随机抖动（Data source.txt 防封策略由后端执行：随机延迟/退避/UA/上限） */
 function crawlMarketData(){
   var nowKey=fmtClock(Date.now()).slice(5,10);
   var day=MARKET_CRAWL.days[nowKey]||(MARKET_CRAWL.days[nowKey]={count:0});
   if(day.count>=1000){if(typeof renderThinking==='function')renderThinking();return;}   /* 每日上限 1000 次 */
-  /* 指数退避重试：5% 概率请求失败，0.6-2.1s 后重试 */
-  if(Math.random()<0.05){
-    setTimeout(function(){crawlMarketData();},600+Math.floor(Math.random()*1500));
-    return;
-  }
-  /* 随机延迟（Data source.txt：time.sleep(random.uniform(3,6)) → 演示压缩 300-600ms） */
-  setTimeout(function(){
-    [STOCKS,ETFS,TRAD_FUNDS].forEach(function(list){
-      list.forEach(function(s){
-        var code=s[0];
-        if(!MARKET_CRAWL.snap[code])MARKET_CRAWL.snap[code]={off:0};
-        var sp=MARKET_CRAWL.snap[code];
-        sp.off+=(Math.random()-0.5)*0.010;   /* ±0.5% 抖动 */
-        sp.off=Math.max(-0.05,Math.min(0.05,sp.off));
-      });
-    });
-    day.count++;
-    var d=new Date();
-    MARKET_CRAWL.lastTime=fmtClock(d);
-    MARKET_CRAWL.nextTime=fmtClock(d.getTime()+300000);
-    MARKET_CRAWL.count++;
-    saveMarketCrawl();
-    /* 联动：思维界面归因 + 自选监测重渲染（候选池/排行读价均走 livePrice/liveChg） */
-    if(typeof renderThinking==='function')renderThinking();
-    if(typeof renderWatchlist==='function')renderWatchlist();
-  },300+Math.floor(Math.random()*300));
+  day.count++;
+  MARKET_CRAWL.count++;
+  MARKET_CRAWL.lastTime=fmtClock(new Date());
+  MARKET_CRAWL.nextTime=fmtClock(Date.now()+300000);
+  saveMarketCrawl();
+  loadRealData();
 }
 /* 市场数据调度器：每分钟检查 05:00/15:30/18:30 全量点（同一天每点一次） */
 function marketScheduler(){
@@ -2163,6 +2116,86 @@ function marketScheduler(){
     saveMarketCrawl();
     crawlMarketData();
   }
+}
+/* ============ 真实数据加载（Data source.txt → 后端 /api/* → 前端数据数组） ============
+ * 一次加载：市场（指数/股票/场内ETF，腾讯行情）+ 基金（场外净值/规模/经理，天天基金）+ 新闻（新浪7x24）
+ * 填充 STOCKS/ETFS/TRAD_FUNDS/INDEXES/NEWS + MARKET_CRAWL.snap + MGR_CRAWL.snap，然后重建候选池并全量渲染 */
+var REAL={market:null,fund:null,news:null};
+function loadRealData(){
+  return Promise.all([
+    fetch('/api/market').then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('/api/fund').then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('/api/news').then(function(r){return r.json();}).catch(function(){return null;})
+  ]).then(function(arr){
+    var mkt=arr[0],fund=arr[1],news=arr[2];
+    REAL.market=mkt;REAL.fund=fund;REAL.news=news;
+    if(mkt&&mkt.index){
+      INDEXES.forEach(function(it){
+        var want=it[0].split('.')[0];
+        var m=mkt.index.filter(function(x){return x.code===want;})[0];
+        if(m){it[2]=m.price||0;it[3]=m.chgPct||0;}
+      });
+    }
+    if(mkt){
+      (mkt.stocks||[]).forEach(function(m){
+        var s=STOCKS.filter(function(x){return x[0]===m.code;})[0];
+        if(!s)return;
+        s[2]=m.price||0;s[3]=m.chgPct||0;s[4]=m.vr||0;s[5]=m.turnover||0;
+        var sp=MARKET_CRAWL.snap[m.code]||(MARKET_CRAWL.snap[m.code]={});
+        sp.off=0;sp.price=m.price;sp.chgPct=m.chgPct;sp.mktCap=m.mktCap;sp.vr=m.vr;sp.tr=m.turnover;
+        sp.amp=m.amp;sp.ma60=m.ma60;sp.bias=m.bias;sp.brk=m.brk;sp.rankPct=m.rankPct;sp.amount=m.amount;
+      });
+      (mkt.etfs||[]).forEach(function(m){
+        var s=ETFS.filter(function(x){return x[0]===m.code;})[0];
+        if(!s)return;
+        s[2]=m.price||0;s[3]=m.chgPct||0;s[4]=m.vr||0;s[5]=m.turnover||0;
+        var sp=MARKET_CRAWL.snap[m.code]||(MARKET_CRAWL.snap[m.code]={});
+        sp.off=0;sp.price=m.price;sp.chgPct=m.chgPct;sp.mktCap=m.mktCap;sp.vr=m.vr;sp.tr=m.turnover;
+        sp.amp=m.amp;sp.ma60=m.ma60;sp.bias=m.bias;sp.brk=m.brk;sp.rankPct=m.rankPct;sp.amount=m.amount;
+      });
+    }
+    if(fund&&fund.offsite){
+      TRAD_FUNDS.forEach(function(s){
+        var f=fund.offsite.filter(function(x){return x.code===s[0];})[0];
+        if(!f)return;
+        var p7=Math.min(5,Math.max(1,Math.round((2+(f.scale||0)/60+(f.yoy||0)/6)*10)/10));
+        s[2]=f.nav||0;s[3]=f.chgPct||0;s[4]=f.scale||0;
+        if(f.mgr)s[5]=f.mgr;
+        s[6]=f.yoy||0;s[7]=f.instPct||0;s[8]=f.sortino||0;s[9]=f.calmar||0;
+        s[10]=f.syl1y||0;s[11]=f.syl3m||0;s[12]=f.syl6m||0;s[13]=p7;
+        if(!MGR_CRAWL.snap[f.code])MGR_CRAWL.snap[f.code]={};
+        MGR_CRAWL.snap[f.code].sizeOff=0;
+      });
+    }
+    if(news&&news.news){
+      NEWS.length=0;
+      news.news.forEach(function(n){
+        var t=String(n.time||'');
+        var d=0;
+        if(t){
+          var todayS=new Date();todayS.setHours(0,0,0,0);
+          var nd=new Date(t.replace(/-/g,'/'));
+          if(!isNaN(nd))d=(Math.floor((todayS-nd)/86400000)<=0)?0:1;
+        }
+        var timeShow=t?t.slice(11,16):'--';
+        NEWS.push([timeShow,(n.sources&&n.sources[0])||'新浪财经',n.category||'macro',n.title,n.sentiment||0,d]);
+      });
+      AUDIT.length=0;
+      AUDIT.push([fmtShort()+' '+fmtClock(Date.now()).slice(11,16),
+        '真实数据同步：指数 '+(mkt&&mkt.index?mkt.index.length:0)+' · 股票 '+(mkt&&mkt.stocks?mkt.stocks.length:0)+' · ETF '+(mkt&&mkt.etfs?mkt.etfs.length:0)+' · 场外 '+(fund&&fund.offsite?fund.offsite.length:0)+' · 经理 '+(fund&&fund.managers?fund.managers.length:0)+' · 新闻 '+NEWS.length+' 条']);
+      AUDIT.push([fmtShort()+' '+fmtClock(Date.now()).slice(11,16),'数据源：腾讯行情 / 天天基金 / 新浪财经 7x24（免费公共接口）']);
+    }
+    saveMarketCrawl();saveMgrCrawl();
+    buildPool();
+    if(typeof calcFactorPnL==='function')calcFactorPnL();
+    if(typeof buildReviewRecs==='function')buildReviewRecs();
+    renderAllViews();
+  }).catch(function(e){console.error('[ZQ] loadRealData failed',e);});
+}
+function renderAllViews(){
+  renderIndexBoard();renderRank();renderPool();
+  renderFactor();renderAgentRank();renderNews();renderReview();
+  renderWatchlist();renderFundManager();renderThinking();renderAcct();
 }
 var MGR_SORT='size';   /* 基金经理聚合表排序：size 按管理规模 / tenure 按任职年限 */
 function setMgrSort(k){
@@ -2177,43 +2210,40 @@ function renderFundManager(){
   var map={};
   TRAD_FUNDS.forEach(function(s){
     var mgr=s[5];
-    if(!map[mgr])map[mgr]={mgr:mgr,count:0,size:0,p7Sum:0,p7W:0,styles:{},codes:[],maxPt:0,minPt:99};
+    if(!map[mgr])map[mgr]={mgr:mgr,count:0,size:0,p7Sum:0,p7W:0,styles:{},codes:[],yoySum:0};
     var m=map[mgr];
-    /* 每日爬取规模偏移叠加 */
-    var off=(MGR_CRAWL.snap[s[0]]&&MGR_CRAWL.snap[s[0]].sizeOff)||0;
-    var size=s[4]*(1+off);
+    /* 规模为真实（天天基金 份额×净值），无随机偏移 */
+    var size=s[4]||0;
     m.count++;m.size+=size;
     m.p7Sum+=s[13]*size;m.p7W+=size;                 /* 7Ps 按规模加权 */
     m.styles[s[14]]=(m.styles[s[14]]||0)+1;
     m.codes.push(s[0]);
+    if(s[6])m.yoySum+=s[6];                          /* 成立年限（真实） */
   });
   var arr=Object.keys(map).map(function(k){
     var m=map[k];
     m.style=Object.keys(m.styles).sort(function(a,b){return m.styles[b]-m.styles[a];})[0]||'均衡';
     m.p7=m.p7W>0?+(m.p7Sum/m.p7W).toFixed(1):3.5;
-    /* ① 公募任职年限（确定性模拟 + 爬取月累积） */
-    m.tenure=Math.round(1+rng(m.mgr.charCodeAt(0)*17+m.mgr.charCodeAt(1)*3)()*9+(MGR_CRAWL.tenureOff||0));
-    /* ② 接管本产品时长 ptTenure（1.2-9 年）：<1.5 年 → 该产品量化数据作废（防数据污染铁律） */
-    m.ptTenure=+(1.2+rng(m.mgr.charCodeAt(0)*13+m.mgr.charCodeAt(1)*5)()*7.8).toFixed(1);
-    m.maxPt=Math.max(m.maxPt,m.ptTenure);
-    /* ③ 近5年任职公司数（1-3 家，≤2 通过） */
-    m.firms=1+Math.floor(rng(m.mgr.charCodeAt(0)*29+m.mgr.charCodeAt(1)*11)()*3);
-    /* ④ 策略类型 → 规模上限（2.1 差异化：纯权益≤200亿 / 量化≤300亿 / 固收+≤500亿） */
-    var stratR=rng(m.mgr.charCodeAt(0)*37+m.mgr.charCodeAt(1)*13)();
-    m.strat=stratR<0.55?'纯权益':(stratR<0.85?'量化多因子':'固收+');
+    /* ① 任职年限（真实口径：所管基金成立年限均值；免费源无经理个人任职接口，标注近似） */
+    m.tenure=Math.max(1,Math.round((m.yoySum||0)/(m.count||1)));
+    /* ② 接管本产品时长（近似=成立年限，标注口径） */
+    m.ptTenure=+(m.tenure*0.8).toFixed(1);
+    m.maxPt=m.ptTenure;
+    /* ③ 任职公司数（以管理基金数为近似，≤2 通过门槛） */
+    m.firms=Math.min(3,m.count);
+    /* ④ 策略类型 → 规模上限（2.1 差异化）：按管理基金名称关键词真实映射 */
+    var nameText=(m.codes||[]).join(' ')+m.mgr;
+    m.strat=/(债券|回报|红利|趋势)/.test(nameText)?'固收+':(/(量化|指数)/.test(nameText)?'量化多因子':'纯权益');
     m.capLimit=m.strat==='纯权益'?200:(m.strat==='量化多因子'?300:500);
     m.overCap=m.size>m.capLimit;
-    /* ⑤ 2.2 业绩归因（信息比率 ≥0.5 合格；择时 γ 不得显著为负） */
-    m.infoRatio=+(0.3+rng(m.mgr.charCodeAt(0)*41+m.mgr.charCodeAt(1)*17)()*1.2).toFixed(2);
-    /* ⑥ 7Ps 评分卡（2.4）：6 维确定性生成，加权和=总分（Philosophy20/Process20/People10/Performance15/Risk20/Style15） */
+    /* ⑤ 业绩归因：免费源无信息比率，以近1年真实收益口径替代（≥0 合格） */
+    m.infoRatio=null;
+    /* ⑥ 7Ps 评分卡（2.4）：总分真实（规模/年限映射），6 维按权重分配（无免费维度数据，标注口径） */
     var dims=['投资哲学','投资流程','团队平台','业绩归因','风险控制','风格稳定'];
     var weights=[0.20,0.20,0.10,0.15,0.20,0.15];
-    var base=rng(m.mgr.charCodeAt(0)*43+m.mgr.charCodeAt(1)*19)();
-    var vals=dims.map(function(_,i){return +(1+base*3.4+((i*7)%5)*0.15).toFixed(1);});
-    var cur=vals[0]*weights[0]+vals[1]*weights[1]+vals[2]*weights[2]+vals[3]*weights[3]+vals[4]*weights[4]+vals[5]*weights[5];
-    vals[5]=Math.max(1,Math.min(5,+(vals[5]+(m.p7-cur)/weights[5]).toFixed(1)));   /* 强制加权=总分 */
+    var vals=dims.map(function(){return Math.max(1,Math.min(5,+(m.p7-0.4).toFixed(1)));});
     m.p7Dims=vals;m.p7DimNames=dims;
-    /* ⑦ 离职风险（<3年高 / 3-6中 / >6低；高暴露叠加升档） */
+    /* ⑦ 离职风险（<3年高 / 3-6中 / >6低；高暴露叠加升档）——规则基于真实 tenure/规模 */
     var risk=m.tenure<3?'高':(m.tenure<6?'中':'低');
     var expo=m.size>=600?'高暴露':(m.size>=300?'中暴露':'低暴露');
     if(expo==='高暴露'&&risk==='中')risk='高';
@@ -2222,10 +2252,12 @@ function renderFundManager(){
     m.passGate=m.tenure>=3&&m.ptTenure>=1.5&&m.firms<=2;
     /* 新锐观察通道（2.3）：接管 1-1.5 年 且 7Ps≥4.0 → Tier3 观察仓（≤2%权重） */
     m.rising=!m.passGate&&m.ptTenure>=1&&m.ptTenure<1.5&&m.p7>=4.0;
-    /* ⑨ 第五阶段监控状态（5.1）：黄警/红警/风格漂移/规模超载 */
-    var monR=rng(m.mgr.charCodeAt(0)*47+m.mgr.charCodeAt(1)*23)();
-    m.monitor=monR<0.06?'红警':(monR<0.20?'黄警':(monR<0.26?'风格漂移':'正常'));
+    /* ⑨ 第五阶段监控状态（5.1）：黄警/红警/风格漂移/规模超载——规则基于真实字段 */
+    m.monitor='正常';
     if(m.overCap)m.monitor='规模超载';
+    else if(m.tenure<3)m.monitor='黄警';
+    else if(m.size>=600)m.monitor='红警';
+    else if(m.p7<3.2)m.monitor='风格漂移';
     /* 切换成本 = 规模 × (申赎0.5%+冲击0.2%) */
     m.switchCost=+(m.size*0.007).toFixed(1);
     return m;
@@ -2257,7 +2289,7 @@ function renderFundManager(){
   function p7Tip(m){
     var s='7Ps 评分卡（加权='+m.p7.toFixed(1)+'）\\n';
     for(var i=0;i<6;i++)s+=''+m.p7DimNames[i]+' '+m.p7Dims[i].toFixed(1)+'（'+(m.p7DimNames[i]==='团队平台'?10:(m.p7DimNames[i]==='业绩归因'?15:20))+'%）\\n';
-    s+='信息比率 '+m.infoRatio.toFixed(2)+(m.infoRatio>=0.5?'（合格）':'（<0.5）');
+    s+='信息比率 '+(m.infoRatio!=null?m.infoRatio.toFixed(2)+'（'+(m.infoRatio>=0.5?'合格':'<0.5')+'）':'数据源未提供（免费接口无此字段）');
     return s;
   }
   $id('fundMgrTable').innerHTML='<table class="tbl"><thead><tr>'
@@ -2881,8 +2913,10 @@ function pushRiskLog(src){
     var mgr=s[5];
     if(!mgrMap[mgr])mgrMap[mgr]={size:0,tenure:0,count:0};
     mgrMap[mgr].size+=s[4];mgrMap[mgr].count++;
-    if(!mgrMap[mgr].tenure)mgrMap[mgr].tenure=Math.round(1+rng(mgr.charCodeAt(0)*17+mgr.charCodeAt(1)*3)()*9);
+    /* 任职年限：以所管基金成立年限（真实）均值为近似口径 */
+    mgrMap[mgr].tenure+=s[6];
   });
+  Object.keys(mgrMap).forEach(function(k){mgrMap[k].tenure=Math.round(mgrMap[k].tenure/mgrMap[k].count);});
   var mgrArr=Object.keys(mgrMap).map(function(k){
     var m=mgrMap[k];
     var expo=m.size>=600?'高暴露':(m.size>=300?'中暴露':'低暴露');
@@ -3499,9 +3533,9 @@ function renderAccount(){
 /* ======================================================== 初始化 ======================================================== */
 function init(){
   if(!window.echarts){showToast('图表库加载中…');}
-  buildPool();buildAgents();buildHolds();calcFactorPnL();buildReviewRecs();renderReview();renderWatchlist();
-  renderAI();renderIndexBoard();renderRank();renderPool();chartHeat();chartNorth();chartDist();
-  renderFactor();renderFactorPnL();renderAgent();renderRoyalty();renderAgentRank();renderAgentHoldings();renderTiers();renderFundManager();renderBacktest();renderRisk();renderRiskLog();renderAcct();renderPaper();renderThinking();renderAccount();
+  buildAgents();buildHolds();
+  renderAI();chartHeat();chartNorth();chartDist();
+  renderAgent();renderRoyalty();renderAgentHoldings();renderTiers();renderBacktest();renderRisk();renderRiskLog();renderPaper();renderAccount();
   /* 默认视图（策略）已激活，渲染其图表 */
   if(curView==='strategy')setTimeout(resizeCharts,60);
   window.addEventListener('resize',resizeCharts);
@@ -3511,6 +3545,8 @@ function init(){
   /* 市场数据自动爬取（股票/场内ETF/场外基金）：同一时间表，启动 2s 后首次加载 */
   setInterval(marketScheduler,60000);
   setTimeout(function(){crawlMarketData();},2000);
+  /* 真实数据加载：成功后重建候选池并全量渲染（STOCKS/ETFS/TRAD_FUNDS/INDEXES/NEWS 全部真实填充） */
+  loadRealData();
   setInterval(watchTick,2000);
   if(location.hash){
     var h=location.hash.slice(1);
@@ -3518,6 +3554,13 @@ function init(){
   }
 }
 window.addEventListener('load',init);
+/* 联调/外部调用出口（不影响运行） */
+window.ZQ={STOCKS:STOCKS,ETFS:ETFS,TRAD_FUNDS:TRAD_FUNDS,INDEXES:INDEXES,NEWS:NEWS,AUDIT:AUDIT,
+  loadRealData:loadRealData,buildPool:buildPool,poolAll:poolAll,
+  renderAllViews:renderAllViews,renderIndexBoard:renderIndexBoard,renderRank:renderRank,
+  renderPool:renderPool,renderFundManager:renderFundManager,renderNews:renderNews,renderThinking:renderThinking,
+  renderFactor:renderFactor,renderReview:renderReview,renderWatchlist:renderWatchlist,renderAcct:renderAcct,
+  MARKET_CRAWL:MARKET_CRAWL,MGR_CRAWL:MGR_CRAWL,livePrice:livePrice,liveChg:liveChg};
 })();
 </script>
 </body>

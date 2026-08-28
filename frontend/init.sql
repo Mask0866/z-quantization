@@ -1,5 +1,6 @@
--- 市场数据表（真实数据：腾讯行情；type: index/stock/etf）
-CREATE TABLE IF NOT EXISTS market_data (
+-- 市场数据表（真实数据：腾讯行情 + 股票60日K线扫描属性；type: index/stock/etf）
+DROP TABLE IF EXISTS market_data;
+CREATE TABLE market_data (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL,  -- 'index', 'stock', 'etf'
   code TEXT NOT NULL,
@@ -12,6 +13,11 @@ CREATE TABLE IF NOT EXISTS market_data (
   turnover REAL,      -- 换手率 %
   vr REAL,            -- 量比
   mkt_cap REAL,       -- 总市值（亿）
+  amp REAL,           -- 振幅 %
+  ma60 REAL,          -- 60日均线（股票，K线计算）
+  bias REAL,          -- 乖离率 %（股票=对60日线；ETF=当日涨幅近似）
+  brk INTEGER,        -- 突破天数（股票=真实；ETF=当日涨幅派生）
+  rank_pct INTEGER,   -- 量价排名百分位
   timestamp TEXT NOT NULL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );

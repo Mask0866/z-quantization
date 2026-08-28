@@ -153,6 +153,51 @@ export async function tencentQuotes(codes) {
 }
 
 /* ============================================================
+ * 1.5 腾讯日 K 线（60 日，用于 screening.txt：站上60日线 / 乖离 / 突破 / 量价排名）
+ * ============================================================ */
+export async function tencentKline(code, days) {
+  var tc = tencentCode(code);
+  var url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=' + tc + ',day,,,' + (days || 60) + ',qfq';
+  var text = await fetchText(url, 'utf-8');
+  var d;
+  try { d = JSON.parse(text); } catch (e) { return null; }
+  var node = d && d.data && (d.data[tc] || d.data[Object.keys(d.data || {})[0]]);
+  var arr = (node && (node.qfqday || node.day)) || [];
+  if (!arr.length) return null;
+  // 计算 60 日 MA / 乖离 / 突破 / 量价排名
+  var closes = arr.map(function (k) { return parseFloat(k[2]); }).filter(function (v) { return isFinite(v); });
+  var vols = arr.map(function (k) { return parseFloat(k[5]); }).filter(function (v) { return isFinite(v); });
+  if (!closes.length) return null;
+  var last = closes[closes.length - 1];
+  var ma60 = closes.reduce(function (a, b) { return a + b; }, 0) / closes.length;
+  var bias = ma60 ? ((last - ma60) / ma60) * 100 : null;
+  // 突破：现价 > 近 5/10/20 日最高价
+  var hi5 = Math.max.apply(null, closes.slice(-5));
+  var hi10 = Math.max.apply(null, closes.slice(-10));
+  var hi20 = Math.max.apply(null, closes.slice(-20));
+  var brk = 0;
+  if (last >= hi20 && hi20 > hi10) brk = 20;
+  else if (last >= hi10 && hi10 > hi5) brk = 10;
+  else if (last >= hi5) brk = 5;
+  // 量价排名：当日量在 60 日中的百分位（越小越靠前）
+  var curVol = vols[vols.length - 1] || 0;
+  var rankPct = null;
+  if (vols.length > 1) {
+    var below = vols.filter(function (v) { return v < curVol; }).length;
+    rankPct = Math.round((below / vols.length) * 100);
+  }
+  return {
+    code: code,
+    price: last,
+    ma60: ma60,
+    bias: bias != null ? +bias.toFixed(2) : null,
+    brk: brk,
+    rankPct: rankPct,
+    days: closes.length
+  };
+}
+
+/* ============================================================
  * 2. 场外基金 — 天天基金移动端基础信息
  * FundMNBasicInformation：最新净值/日涨幅/份额/阶段收益/经理/公司/成立日期/申赎状态
  * ============================================================ */

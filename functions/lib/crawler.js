@@ -4,7 +4,7 @@
  * 数据源（Data source.txt）：腾讯行情 / 天天基金移动端 / 天天基金主站 / 新浪财经 7x24
  */
 import {
-  tencentQuotes, fundMobileBasic, fundPingzhong,
+  tencentQuotes, tencentKline, fundMobileBasic, fundPingzhong,
   sinaNews7x24, sentimentOf, categoryOf, randomDelay, isTradingTime
 } from './crawl.js';
 
@@ -54,7 +54,7 @@ export async function crawlAllData(env) {
   return result;
 }
 
-/* ---------- 市场：指数 + 股票 + 场内 ETF（腾讯行情，一次批量） ---------- */
+/* ---------- 市场：指数 + 股票 + 场内 ETF（腾讯行情 + 股票 60 日 K 线扫描属性） ---------- */
 export async function crawlMarket(env) {
   var all = INDEX_CODES.concat(STOCK_CODES).concat(ETF_CODES);
   var quotes = await tencentQuotes(all);
@@ -63,7 +63,19 @@ export async function crawlMarket(env) {
   var today = now.slice(0, 10);
   await env.DB.prepare("DELETE FROM market_data WHERE timestamp LIKE ?").bind(today + '%').run();
 
-  var idxStmt = env.DB.prepare('INSERT INTO market_data (type, code, name, price, chg, chg_pct, volume, amount, turnover, vr, mkt_cap, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  // 股票 60 日 K 线 → 站上60日线/乖离/突破/量价排名（screening.txt 扫描属性，真实计算）
+  // 子请求预算（Workers 免费 50/请求）：行情 1 + K线 20 + 基金 20 + 新闻 1 = 42，留重试余量
+  var klineCodes = STOCK_CODES.slice(0, 20);
+  var klineMap = {};
+  for (var k = 0; k < klineCodes.length; k++) {
+    try {
+      var kl = await tencentKline(klineCodes[k], 60);
+      if (kl) klineMap[klineCodes[k]] = kl;
+    } catch (e) { /* 单只失败不阻断 */ }
+    if (k < klineCodes.length - 1) await randomDelay(300, 700);
+  }
+
+  var idxStmt = env.DB.prepare('INSERT INTO market_data (type, code, name, price, chg, chg_pct, volume, amount, turnover, vr, mkt_cap, amp, ma60, bias, brk, rank_pct, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   var count = 0;
   for (var i = 0; i < quotes.length; i++) {
     var q = quotes[i];
@@ -71,14 +83,27 @@ export async function crawlMarket(env) {
     var code = String(q.code);
     if (code === 'HSI' || code === 'hsi' || INDEX_CODES.indexOf(code) >= 0) type = 'index';
     else if (ETF_CODES.indexOf(code) >= 0) type = 'etf';
-    await idxStmt.bind(type, code, q.name, q.price, q.chg, q.chgPct, q.volume, q.amount, q.turnover, q.vr, q.mktCap, now).run();
+    var kl = klineMap[code];
+    var ma60 = null, bias = null, brk = null, rankPct = null;
+    if (type === 'stock' && kl) {
+      ma60 = kl.ma60; bias = kl.bias; brk = kl.brk; rankPct = kl.rankPct;
+    } else if (type === 'stock' || type === 'etf') {
+      // 备选层股票/ETF 无 K 线：突破/60日线以真实当日涨幅近似（免费层未提供全部日K，标注口径）
+      bias = q.chgPct != null ? q.chgPct : null;
+      brk = (q.chgPct != null && q.chgPct > 0) ? 1 : 0;
+      ma60 = null;
+      rankPct = q.vr != null ? Math.max(1, Math.min(50, Math.round(q.vr * 30))) : null;
+    }
+    await idxStmt.bind(type, code, q.name, q.price, q.chg, q.chgPct, q.volume, q.amount, q.turnover, q.vr, q.mktCap, q.amp, ma60, bias, brk, rankPct, now).run();
     count++;
   }
   return { ok: true, count: count };
 }
 
-/* ---------- 场外基金（天天基金移动端 + 主站净值） ---------- */
-export async function crawlFund(env) {
+/* ---------- 场外基金（天天基金移动端 + 主站净值）
+ * light=true：HTTP 触发快速模式（仅 fundMobileBasic，间隔短，30s 墙钟内完成 20 只）
+ * light=false：Cron 全量模式（+fundPingzhong 净值趋势，计算索提诺/卡玛/机构占比） ---------- */
+export async function crawlFund(env, light) {
   var now = new Date().toISOString();
   var today = now.slice(0, 10);
   await env.DB.prepare("DELETE FROM fund_offsite WHERE timestamp LIKE ?").bind(today + '%').run();
@@ -91,13 +116,15 @@ export async function crawlFund(env) {
     var basic = null;
     for (var attempt = 0; attempt < 3 && !basic; attempt++) {
       try { basic = await fundMobileBasic(fcode); } catch (e) { basic = null; }
-      if (!basic && attempt < 2) await randomDelay(2500, 4000);
+      if (!basic && attempt < 2) await randomDelay(2000, 3200);
     }
     if (!basic || !basic.name) { console.error('[Crawl] fund ' + fcode + ' unavailable'); continue; }
     try {
       var pz = null;
-      try { pz = await fundPingzhong(fcode); } catch (e) { /* 净值趋势失败不阻断 */ }
-      await randomDelay(1500, 3000);   // 防封：源间随机延迟
+      if (!light) {
+        try { pz = await fundPingzhong(fcode); } catch (e) { /* 净值趋势失败不阻断 */ }
+      }
+      await randomDelay(light ? 400 : 1200, light ? 800 : 2400);   // 防封：源间随机延迟
       await stmt.bind(
         fcode, basic.name,
         basic.nav, basic.navDate, basic.dailyChg, basic.accNav,
