@@ -124,6 +124,36 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 模拟盘持仓表（每日自动交易引擎：真实行情驱动）
+CREATE TABLE IF NOT EXISTS paper_portfolio (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  type TEXT NOT NULL,       -- stock / etf / tradfund
+  shares REAL NOT NULL,     -- 持仓数量（股/份）
+  cost_price REAL NOT NULL, -- 成本价
+  current_price REAL,       -- 最新价
+  layer TEXT,               -- 当前分层 core/sec/back
+  updated_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_paper_code ON paper_portfolio(code);
+
+-- 自动交易记录表
+CREATE TABLE IF NOT EXISTS trade_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  trade_date TEXT NOT NULL,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  action TEXT NOT NULL,     -- buy / sell / sell_stop / sell_trim
+  price REAL NOT NULL,
+  shares REAL NOT NULL,
+  amount REAL NOT NULL,
+  reason TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_trade_date ON trade_log(trade_date);
+
 -- 同步日志表
 CREATE TABLE IF NOT EXISTS sync_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -2120,15 +2120,16 @@ function marketScheduler(){
 /* ============ 真实数据加载（Data source.txt → 后端 /api/* → 前端数据数组） ============
  * 一次加载：市场（指数/股票/场内ETF，腾讯行情）+ 基金（场外净值/规模/经理，天天基金）+ 新闻（新浪7x24）
  * 填充 STOCKS/ETFS/TRAD_FUNDS/INDEXES/NEWS + MARKET_CRAWL.snap + MGR_CRAWL.snap，然后重建候选池并全量渲染 */
-var REAL={market:null,fund:null,news:null};
+var REAL={market:null,fund:null,news:null,trade:null};
 function loadRealData(){
   return Promise.all([
     fetch('/api/market').then(function(r){return r.json();}).catch(function(){return null;}),
     fetch('/api/fund').then(function(r){return r.json();}).catch(function(){return null;}),
-    fetch('/api/news').then(function(r){return r.json();}).catch(function(){return null;})
+    fetch('/api/news').then(function(r){return r.json();}).catch(function(){return null;}),
+    fetch('/api/trade').then(function(r){return r.json();}).catch(function(){return null;})
   ]).then(function(arr){
-    var mkt=arr[0],fund=arr[1],news=arr[2];
-    REAL.market=mkt;REAL.fund=fund;REAL.news=news;
+    var mkt=arr[0],fund=arr[1],news=arr[2],trade=arr[3];
+    REAL.market=mkt;REAL.fund=fund;REAL.news=news;REAL.trade=trade;
     if(mkt&&mkt.index){
       INDEXES.forEach(function(it){
         var want=it[0].split('.')[0];
@@ -2189,7 +2190,8 @@ function loadRealData(){
     buildPool();
     if(typeof calcFactorPnL==='function')calcFactorPnL();
     if(typeof buildReviewRecs==='function')buildReviewRecs();
-    renderAllViews();
+    if(typeof buildHolds==='function')buildHolds().then(function(){renderAllViews();});
+    else renderAllViews();
   }).catch(function(e){console.error('[ZQ] loadRealData failed',e);});
 }
 function renderAllViews(){
@@ -2526,17 +2528,19 @@ function renderBacktest(){
 /* ======================================================== 视图六：模拟盘 ======================================================== */
 var HOLDS=[];
 function buildHolds(){
-  /* 模拟"数据多了"场景：18 条持仓，覆盖 股票（核心/次选/备选）+ ETF + 传统基金 */
-  var pool=STOCKS.slice(0,13).concat(ETFS.slice(0,3)).concat(TRAD_FUNDS.slice(0,2));
-  HOLDS=pool.slice(0,18).map(function(s,i){
-    var qty=(i%5+1)*100+200;
-    var cost=+(s[2]*(1+(rng(s[0].charCodeAt(1)+i)()-0.5)*0.06)).toFixed(2);
-    return {code:s[0],name:s[1],price:s[2],chg:s[3],qty:qty,cost:cost,days:2+(i*2)%15};
+  /* 真实持仓：自动交易引擎（/api/trade）驱动的模拟盘持仓，无随机生成 */
+  HOLDS=[];
+  return fetch('/api/trade').then(function(r){return r.json();}).catch(function(){return null;}).then(function(d){
+    if(d&&d.positions){
+      HOLDS=d.positions.map(function(p){
+        return {code:p.code,name:p.name,price:p.currentPrice||p.costPrice,chg:p.pnlPct||0,qty:p.shares,cost:p.costPrice,days:1};
+      });
+    }
+    /* 模拟盘金额数据根据持仓变化重算 */
+    var posVal=0;HOLDS.forEach(function(h){posVal+=h.price*h.qty;});
+    renderPaper.posVal=posVal;
+    return d;
   });
-  /* 模拟盘金额数据需根据持仓变化重算 */
-  var posVal=0;HOLDS.forEach(function(h){posVal+=h.price*h.qty;});
-  /* 更新账户总览数据（暴露给 renderPaper 使用） */
-  renderPaper.posVal=posVal;
 }
 /* ======================================================== 账户总览：可编辑总资产 ========================================================
  * ACCT_BASE 为基线快照（总资产 = 6 层级资金池之和 = 9,130,640），ACCT.factor 为下次交易缩放因子（默认 1.0）
@@ -2629,40 +2633,29 @@ function renderPaper(){
    +'<div class="set-row"><span class="k">熔断状态</span><span class="d" style="color:#3FB950">正常 · 未触发</span></div>'
    +'<div class="set-row"><span class="k">个股集中度</span><span class="d mono">最大 7.8% ≤ 10%</span></div>'
    +'<div class="set-row"><span class="k">板块联动预警</span><span class="d" style="color:#D29922">监测中 · 无触发</span></div>';
-  var t0='<table class="tbl"><thead><tr><th>时间</th><th>方向</th><th>代码</th><th class="r">数量</th><th class="r">价格</th></tr></thead><tbody>';
-  var orders=[
-    ['10:32','买入','600519',100,1689.50],
-    ['10:30','买入','300308',300,148.30],
-    ['10:25','卖出','002230',500,46.80],
-    ['10:18','买入','000858',200,142.80],
-    ['10:15','买入','510300',5000,3.92],
-    ['10:08','申购','110011',2000,5.36],
-    ['10:00','买入','601899',800,19.40],
-    ['09:55','买入','600036',1500,36.90],
-    ['09:45','卖出','002475',400,39.70],
-    ['09:31','买入','002594',500,312.80]
-  ];
-  $id('ordersToday').innerHTML=t0+orders.map(function(o){
-    var cls2=(o[1]==='买入'||o[1]==='申购')?'up':'down';
-    return '<tr><td class="mono">'+o[0]+'</td><td class="'+cls2+'">'+o[1]+'</td><td>'+jlink('stock',o[2],o[2])+'</td><td class="r mono">'+o[3]+'</td><td class="r mono">'+o[4].toFixed(2)+'</td></tr>';
-  }).join('')+'</tbody></table>';
-  $id('ordersMeta').textContent='今日 '+orders.length+' 条（含 ETF 买入 / 主动基金申购）';
-  var trades=[
-    ['08-23 14:52','卖出','002230',500,45.10],
-    ['08-23 11:08','买入','601318',800,52.30],
-    ['08-22 10:30','申购','110011',2000,5.30],
-    ['08-21 13:40','买入','300750',200,245.60],
-    ['08-20 10:15','卖出','000001',3000,11.90],
-    ['08-19 15:02','买入','600276',500,46.90],
-    ['08-18 09:35','买入','000858',200,140.20],
-    ['08-15 14:20','赎回','519066',3000,3.05],
-    ['08-12 11:45','买入','300059',1000,22.60]
-  ];
+  var t0='<table class="tbl"><thead><tr><th>时间</th><th>方向</th><th>代码</th><th class="r">数量</th><th class="r">价格</th><th>原因</th></tr></thead><tbody>';
+  /* 真实订单：自动交易引擎 trade_log（/api/trade） */
+  var ACT_LABEL={buy:'买入',sell:'卖出',sell_stop:'止损卖出',sell_trim:'止盈减仓'};
+  var ACT_CLS={buy:'up',sell:'down',sell_stop:'down',sell_trim:'up'};
+  var realTrades=(REAL&&REAL.trade&&REAL.trade.trades)||[];
+  var todayS=fmtShort();
+  var orders=realTrades.filter(function(t){return (t.date||'').indexOf(todayS.slice(0,10))>=0 || String(t.date||'').indexOf(new Date().getFullYear()+'-')>=0;}).slice(0,12);
+  var ordersHtml=orders.length
+    ?orders.map(function(o){
+      var lb=ACT_LABEL[o.action]||o.action;
+      var c2=ACT_CLS[o.action]||'up';
+      return '<tr><td class="mono">'+String(o.date||'').slice(5,16)+'</td><td class="'+c2+'">'+lb+'</td><td>'+jlink('stock',o.code,o.code)+'</td><td class="r mono">'+o.shares+'</td><td class="r mono">'+o.price.toFixed(3)+'</td><td style="font-size:10px;color:var(--txt2)">'+esc(o.reason||'')+'</td></tr>';
+    }).join('')
+    :'<tr><td colspan="6" style="text-align:center;color:var(--mut)">今日无自动交易 · 收盘后 15:35 自动执行（GitHub Actions 定时触发）</td></tr>';
+  $id('ordersToday').innerHTML=t0+ordersHtml+'</tbody></table>';
+  $id('ordersMeta').textContent='今日 '+orders.length+' 条 · 数据源：自动交易引擎（真实行情驱动）';
+  var trades=realTrades.slice(0,12);
   $id('tradeHis').innerHTML=t0+trades.map(function(t){
-    var cls2=(t[1]==='买入'||t[1]==='申购')?'up':'down';
-    return '<tr><td class="mono">'+t[0]+'</td><td class="'+cls2+'">'+t[1]+'</td><td>'+jlink('stock',t[2],t[2])+'</td><td class="r mono">'+t[3]+'</td><td class="r mono">'+t[4].toFixed(2)+'</td></tr>';
+    var lb=ACT_LABEL[t.action]||t.action;
+    var cls2=ACT_CLS[t.action]||'up';
+    return '<tr><td class="mono">'+String(t.date||'').slice(0,16)+'</td><td class="'+cls2+'">'+lb+'</td><td>'+jlink('stock',t.code,t.code)+'</td><td class="r mono">'+t.shares+'</td><td class="r mono">'+t.price.toFixed(3)+'</td><td style="font-size:10px;color:var(--txt2)">'+esc(t.reason||'')+'</td></tr>';
   }).join('')+'</tbody></table>';
-  $id('tradesMeta').textContent='近 7 日 '+trades.length+' 条（含申购/赎回）';
+  $id('tradesMeta').textContent='近 100 条自动交易记录 · 数据源：自动交易引擎（真实行情驱动）';
   var cash=[
     ['08-24','入金','—',null,+500000],
     ['08-22','分红','600519',null,+12840],

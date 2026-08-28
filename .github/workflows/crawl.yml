@@ -19,6 +19,11 @@ jobs:
         run: |
           curl -s -X POST "https://z-quantization.pages.dev/api/sync/fund" \
             -H "Content-Type: application/json" -d '{}' || echo "sync(fund) failed"
+      - name: Trigger daily auto trade (after close, 15:35 run only)
+        if: github.event.schedule == '35 7 * * *'
+        run: |
+          curl -s -X POST "https://z-quantization.pages.dev/api/trade" \
+            -H "Content-Type: application/json" -d '{}' || echo "auto trade failed"
       - name: Verify sync status
         run: |
           curl -s "https://z-quantization.pages.dev/api/sync/status" || echo "status check failed"
