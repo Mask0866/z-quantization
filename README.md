@@ -27,9 +27,8 @@ Z-quantization 是基于 Z-quantization 设计文档 V5.0 第十章「前端 UI 
 
 ### Cloudflare Pages
 - 生产环境：https://z-quantization.pages.dev/ui-v5
-- 自定义域名：https://luo798.ccwu.cc/ui-v5（2026-08-27 已重新绑定，等待 DNS/CNAME 与证书签发）
 - D1 数据库：`z-quantization-db`（已创建，`init.sql` 已执行：7 张业务表）
-- Pages Functions：`frontend/functions/`（API：/api/market·fund·news·risk·sync；定时：/cron/schedule）
+- Pages Functions：`functions/`（项目根，API：/api/market·fund·news·risk·sync；定时：/cron/schedule）
 
 ## 本地运行
 
@@ -60,8 +59,8 @@ git push origin master
 # ② 手动部署到 Cloudflare Pages（自动应用 functions/ + _routes.json + D1 binding）
 wrangler pages deploy frontend --project-name=z-quantization
 
-# ③ 定时爬取触发器（首次部署后一次性注册 crons）
-# 已配置 wrangler.toml [triggers] crons = 05:00 / 15:30 / 18:30
+# ③ 定时爬取触发器（首次部署后一次性在 Cloudflare Dashboard 配置）
+# Pages 项目 → Settings → Functions → Cron Triggers：0 5 * * * / 30 15 * * * / 30 18 * * *
 ```
 
 ## API 接口
@@ -82,7 +81,7 @@ wrangler pages deploy frontend --project-name=z-quantization
 
 ## 疑难排查
 
-- 自定义域名验证失败：确认 zone `luo798.ccwu.cc` 状态 active，CNAME `luo798.ccwu.cc → z-quantization.pages.dev`（代理开启）；若提示 "CNAME record not set"，在 Pages 项目删除该域名后重新添加，Cloudflare 会自动创建 DNS 记录。
+- 访问地址：https://z-quantization.pages.dev/ui-v5（Pages 默认 *.pages.dev 域名，无需配置自定义域名）。
 - API 404：确认 `frontend/_routes.json` 的 include 包含 `/api/*` 与 `/cron/*`。
 - D1 表缺失：`wrangler d1 execute z-quantization-db --remote --file=frontend/init.sql`
 

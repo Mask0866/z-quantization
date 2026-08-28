@@ -13,8 +13,7 @@ wrangler pages deploy frontend --project-name=z-quantization --branch=master --c
 
 echo ""
 echo "=== [2/2] 部署完成 ==="
-echo "  生产地址:   https://z-quantization.pages.dev/ui-v5"
-echo "  自定义域名: https://luo798.ccwu.cc/ui-v5（DNS/CNAME 自动创建中，需等待证书签发）"
+echo "  线上地址:   https://z-quantization.pages.dev/ui-v5"
 echo ""
 echo "⚠️  定时爬取 Cron Triggers（需在 Cloudflare Dashboard 配置一次）："
 echo "    Pages 项目 → Settings → Functions → Cron Triggers，添加："

@@ -10,7 +10,7 @@ database_id = "85bb49b5-fbf7-4bdf-8abd-d7346e07ceae"
 
 # 环境变量
 [vars]
-CUSTOM_DOMAIN = "luo798.ccwu.cc"
+CUSTOM_DOMAIN = "https://z-quantization.pages.dev"
 API_VERSION = "v1"
 
 # 注意：Pages 项目不支持 wrangler.toml [triggers]（cron 需在 Pages Dashboard
