@@ -83,16 +83,21 @@ export async function crawlFund(env) {
   var today = now.slice(0, 10);
   await env.DB.prepare("DELETE FROM fund_offsite WHERE timestamp LIKE ?").bind(today + '%').run();
 
-  var stmt = env.DB.prepare('INSERT INTO fund_offsite (code, name, nav, nav_date, chg_pct, acc_nav, scale, mgr, estab_date, yoy, inst_pct, syl_1m, syl_3m, syl_6m, syl_1y, buy_state, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  var stmt = env.DB.prepare('INSERT INTO fund_offsite (code, name, nav, nav_date, chg_pct, acc_nav, scale, mgr, estab_date, yoy, inst_pct, syl_1m, syl_3m, syl_6m, syl_1y, sortino, calmar, yoy_ann, buy_state, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
   var count = 0;
   for (var i = 0; i < TRAD_FUND_CODES.length; i++) {
     var fcode = TRAD_FUND_CODES[i];
+    // 限流应对：失败重试（间隔递增）
+    var basic = null;
+    for (var attempt = 0; attempt < 3 && !basic; attempt++) {
+      try { basic = await fundMobileBasic(fcode); } catch (e) { basic = null; }
+      if (!basic && attempt < 2) await randomDelay(2500, 4000);
+    }
+    if (!basic || !basic.name) { console.error('[Crawl] fund ' + fcode + ' unavailable'); continue; }
     try {
-      var basic = await fundMobileBasic(fcode);
-      if (!basic || !basic.name) { continue; }
       var pz = null;
       try { pz = await fundPingzhong(fcode); } catch (e) { /* 净值趋势失败不阻断 */ }
-      await randomDelay(600, 1500);   // 防封：源间随机延迟
+      await randomDelay(1500, 3000);   // 防封：源间随机延迟
       await stmt.bind(
         fcode, basic.name,
         basic.nav, basic.navDate, basic.dailyChg, basic.accNav,
@@ -102,6 +107,7 @@ export async function crawlFund(env) {
         (basic.syl && basic.syl.m3) != null ? basic.syl.m3 : null,
         (basic.syl && basic.syl.m6) != null ? basic.syl.m6 : null,
         (basic.syl && basic.syl.y1) != null ? basic.syl.y1 : null,
+        pz ? pz.sortino : null, pz ? pz.calmar : null, pz ? pz.yoyAnn : null,
         basic.buyState, now
       ).run();
       count++;

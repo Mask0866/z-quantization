@@ -88,6 +88,7 @@ function marketPrefix(code) {
 
 export function tencentCode(code) {
   code = String(code);
+  if (/^hk/i.test(code) && /^hk[A-Z]{2,5}$/i.test(code)) return code;   // hkHSI 等：保持原样（腾讯要求 hk 小写）
   if (/\.(SH|SZ|BJ)$/i.test(code)) {
     var suffix = code.split('.').pop().toLowerCase();
     return (suffix === 'sh' ? 'sh' : suffix) + code.split('.')[0];
@@ -96,16 +97,16 @@ export function tencentCode(code) {
   return marketPrefix(code) + code;
 }
 
-/** 解析单条腾讯行情 */
+/** 解析单条腾讯行情（A股/港股统一字段布局：[30]时间 [31]涨跌额 [32]涨跌幅 [33]最高 [34]最低） */
 function parseTencentLine(line) {
   var eq = line.indexOf('=');
   if (eq < 0) return null;
-  var varName = line.slice(0, eq).trim();                 // v_sh600519
+  var varName = line.slice(0, eq).trim();                 // v_sh600519 / v_hkHSI
   var raw = line.slice(eq + 1).trim().replace(/^"|";?$/g, '');
   var f = raw.split('~');
-  if (f.length < 50) return null;
+  var mkt = varName.replace(/^v_/, '').slice(0, 2);       // sh / sz / hk / bj
+  if (f.length < 35) return null;
   var num = function (i) { var v = parseFloat(f[i]); return isFinite(v) ? v : null; };
-  var mkt = varName.replace(/^v_/, '').slice(0, 2);       // sh / sz / bj
   return {
     market: mkt,
     code: f[2] || varName.slice(3),
@@ -119,14 +120,14 @@ function parseTencentLine(line) {
     chgPct: num(32),
     high: num(33),
     low: num(34),
-    amount: num(37),                // 万元
-    turnover: num(38),              // 换手率 %
+    amount: num(37),                // 万元（A股；港股 null）
+    turnover: num(38),              // 换手率 %（A股；港股 null）
     pe: num(39),
-    amp: num(43),                   // 振幅 %
-    floatCap: num(44),              // 流通市值 亿
-    mktCap: num(45),                // 总市值 亿
+    amp: num(43),                   // 振幅 %（A股）
+    floatCap: num(44),              // 流通市值 亿（A股）
+    mktCap: num(45),                // 总市值 亿（A股；港股指数 null）
     pb: num(46),
-    vr: num(49)                     // 量比
+    vr: num(49)                     // 量比（A股）
   };
 }
 
@@ -261,7 +262,7 @@ export async function fundPingzhong(fcode) {
     var m = new RegExp('var\\s+' + k + '\\s*=\\s*"([^"]*)"').exec(text);
     out[k] = m ? parseFloat(m[1]) : null;
   });
-  // 历史净值趋势（Data_netWorthTrend，取最后一条）
+  // 历史净值趋势（Data_netWorthTrend，取最后一条 + 完整序列供多因子计算）
   var trendStr = extractArrayEnd(text, 'Data_netWorthTrend');
   if (trendStr) {
     try {
@@ -271,6 +272,7 @@ export async function fundPingzhong(fcode) {
         out.nav = last.y;
         out.navDate = last.x ? new Date(last.x).toISOString().slice(0, 10) : '';
         out.dailyChg = (last.equityReturn != null) ? last.equityReturn : null;
+        out._trend = trend.slice(-300);   // 近一年日净值（含余量），供索提诺/卡玛计算
       }
     } catch (e) { /* ignore */ }
   }
@@ -299,7 +301,44 @@ export async function fundPingzhong(fcode) {
   if (scStr) {
     try { out.stocks = JSON.parse(scStr); } catch (e) { out.stocks = []; }
   }
+  // V2.5 多因子：索提诺 / 卡玛 / 年化（基于真实日净值序列计算）
+  if (out._trend && out._trend.length > 30) {
+    var ratios = calcSortinoCalmar(out._trend);
+    out.sortino = ratios.sortino;
+    out.calmar = ratios.calmar;
+    out.yoyAnn = ratios.yoyAnn;
+  }
   out.scale = null;   // 规模以 fundMobileBasic().scale（份额×净值）为准
+  return out;
+}
+
+/** 从日净值序列计算索提诺/卡玛/年化收益（无风险利率按 0 简化，A 股量化常用） */
+function calcSortinoCalmar(series) {
+  var rets = [];
+  for (var i = 1; i < series.length; i++) {
+    var prev = series[i - 1].y, cur = series[i].y;
+    if (!prev || !cur) continue;
+    rets.push(cur / prev - 1);
+  }
+  var out = { sortino: null, calmar: null, yoyAnn: null };
+  if (rets.length < 20) return out;
+  var n = rets.length;
+  var mean = rets.reduce(function (a, b) { return a + b; }, 0) / n;
+  var ann = Math.pow(1 + mean, 250) - 1;
+  var ddSum = 0, ddN = 0;
+  rets.forEach(function (r) { if (r < 0) { ddSum += r * r; ddN++; } });
+  var dstd = ddN ? Math.sqrt(ddSum / ddN) : 0;
+  if (dstd > 0) out.sortino = +((mean / dstd) * Math.sqrt(250)).toFixed(2);
+  // 最大回撤（净值曲线）
+  var peak = -Infinity, mdd = 0;
+  series.forEach(function (pt) {
+    if (!pt.y) return;
+    if (pt.y > peak) peak = pt.y;
+    var dd = (pt.y - peak) / peak;
+    if (dd < mdd) mdd = dd;
+  });
+  if (Math.abs(mdd) > 1e-6) out.calmar = +(ann / Math.abs(mdd)).toFixed(2);
+  out.yoyAnn = +(ann * 100).toFixed(2);
   return out;
 }
 

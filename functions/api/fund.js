@@ -44,6 +44,7 @@ export async function onRequest(context) {
           code: r.code, name: r.name, nav: r.nav, navDate: r.nav_date, chgPct: r.chg_pct,
           accNav: r.acc_nav, scale: r.scale, mgr: r.mgr, estabDate: r.estab_date, yoy: r.yoy,
           instPct: r.inst_pct, syl1m: r.syl_1m, syl3m: r.syl_3m, syl6m: r.syl_6m, syl1y: r.syl_1y,
+          sortino: r.sortino, calmar: r.calmar, yoyAnn: r.yoy_ann,
           buyState: r.buy_state, time: r.timestamp
         };
       }),

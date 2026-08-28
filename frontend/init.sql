@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS factor_data (
 );
 
 -- 场外主动基金数据表（真实数据：天天基金；20 只候选池）
-CREATE TABLE IF NOT EXISTS fund_offsite (
+DROP TABLE IF EXISTS fund_offsite;
+CREATE TABLE fund_offsite (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   code TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -90,6 +91,9 @@ CREATE TABLE IF NOT EXISTS fund_offsite (
   yoy REAL,             -- 成立年限（年）
   inst_pct REAL,        -- 机构持有占比 %
   syl_1m REAL, syl_3m REAL, syl_6m REAL, syl_1y REAL,
+  sortino REAL,         -- 索提诺比率（净值序列计算）
+  calmar REAL,          -- 卡玛比率（净值序列计算）
+  yoy_ann REAL,         -- 年化收益 %
   buy_state TEXT,
   timestamp TEXT NOT NULL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
