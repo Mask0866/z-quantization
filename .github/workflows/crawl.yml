@@ -1,0 +1,24 @@
+name: daily-crawl
+
+on:
+  schedule:
+    - cron: "5 5 * * *"    # 北京时间 13:05（UTC 05:05）— 数据准备
+    - cron: "35 7 * * *"   # 北京时间 15:35（UTC 07:35）— 收盘后行情+新闻
+    - cron: "35 10 * * *"  # 北京时间 18:35（UTC 10:35）— 基金净值更新后
+  workflow_dispatch:       # 手动触发
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger market + news crawl
+        run: |
+          curl -s -X POST "https://z-quantization.pages.dev/api/sync" \
+            -H "Content-Type: application/json" -d '{}' || echo "sync(market+news) failed"
+      - name: Trigger fund + managers crawl
+        run: |
+          curl -s -X POST "https://z-quantization.pages.dev/api/sync/fund" \
+            -H "Content-Type: application/json" -d '{}' || echo "sync(fund) failed"
+      - name: Verify sync status
+        run: |
+          curl -s "https://z-quantization.pages.dev/api/sync/status" || echo "status check failed"
