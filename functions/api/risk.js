@@ -1,36 +1,89 @@
+/**
+ * 风控 API（基于真实持仓数据计算）
+ * - POST /api/risk/metrics   基于 D1 agent_positions 真实持仓计算风险指标
+ * - GET  /api/risk/stress    压力测试（基于真实持仓模拟跌幅）
+ */
+const headers = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const method = request.method;
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
   if (method === 'OPTIONS') return new Response(null, { headers });
+
+  /* POST /api/risk/metrics — 从 agent_positions 真实持仓计算 */
   if (url.pathname === '/api/risk/metrics' && method === 'POST') {
+    const rows = (await env.DB.prepare('SELECT * FROM agent_positions').all()).results || [];
+    const n = rows.length;
+    let totalCost = 0, totalValue = 0, winN = 0, lossSum = 0, winSum = 0, pnlArr = [];
+    rows.forEach(function (r) {
+      const cost = (r.cost_price || 0) * (r.shares || 0);
+      const cur = (r.current_price || r.cost_price || 0) * (r.shares || 0);
+      totalCost += cost; totalValue += cur;
+      const pnl = cur - cost;
+      pnlArr.push(pnl);
+      if (pnl >= 0) { winN++; winSum += pnl; } else { lossSum += -pnl; }
+    });
+    const totalPnl = totalValue - totalCost;
+    const avgWin = winN ? +(winSum / winN).toFixed(2) : null;
+    const avgLoss = (n - winN) ? +(lossSum / (n - winN)).toFixed(2) : null;
+    // 简单波动率（持仓 PnL 标准差，样本少时保守估算）
+    let std = 0;
+    if (pnlArr.length > 1) {
+      const mean = pnlArr.reduce(function (a, b) { return a + b; }, 0) / pnlArr.length;
+      std = Math.sqrt(pnlArr.reduce(function (a, b) { return a + (b - mean) * (b - mean); }, 0) / pnlArr.length);
+    }
+    const exposure = totalCost > 0 ? Math.min(totalValue / totalCost, 1.5) : 0;
     return new Response(JSON.stringify({
-      metrics: { var95: -0.0234, var99: -0.0456, maxDrawdown: -0.1234, sharpeRatio: 1.23, sortinoRatio: 1.56, beta: 0.85, alpha: 0.023, calmarRatio: 0.67, winRate: 0.58, profitFactor: 1.45, avgWin: 0.023, avgLoss: -0.018, maxConsecutiveLoss: 4, exposure: 0.78, concentration: 0.23 },
-      pillars: [
-        { id: 1, name: '止损纪律', status: 'on', threshold: -0.12, current: -0.08 },
-        { id: 2, name: '仓位控制', status: 'on', threshold: 0.8, current: 0.65 },
-        { id: 3, name: '行业分散', status: 'warn', threshold: 0.3, current: 0.35 },
-        { id: 4, name: '流动性', status: 'on', threshold: 0.1, current: 0.05 },
-        { id: 5, name: '相关性', status: 'on', threshold: 0.7, current: 0.45 },
-        { id: 6, name: '杠杆风险', status: 'on', threshold: 0, current: 0 },
-        { id: 7, name: '尾部风险', status: 'warn', threshold: 0.15, current: 0.18 }
-      ],
+      metrics: {
+        holdings: n,
+        totalCost: +totalCost.toFixed(2),
+        totalValue: +totalValue.toFixed(2),
+        totalPnl: +totalPnl.toFixed(2),
+        totalPnlPct: totalCost > 0 ? +((totalPnl / totalCost) * 100).toFixed(2) : 0,
+        winRate: n ? +(winN / n).toFixed(2) : 0,
+        avgWin: avgWin, avgLoss: avgLoss,
+        profitFactor: avgLoss ? +(winSum / lossSum).toFixed(2) : null,
+        maxDrawdown: null,          // 需历史净值序列，暂未接入
+        var95: null, var99: null, sharpeRatio: null,
+        exposure: +exposure.toFixed(2),
+        pnlStd: +std.toFixed(2)
+      },
       lastUpdate: new Date().toLocaleString('zh-CN'),
-      source: 'api'
+      source: 'real-positions'
     }), { headers: { ...headers, 'Content-Type': 'application/json' } });
   }
-  if (url.pathname === '/api/risk/stress') {
+
+  /* GET /api/risk/stress?scenario= — 基于真实持仓的压力测试 */
+  if (url.pathname === '/api/risk/stress' && method === 'GET') {
     const scenario = url.searchParams.get('scenario') || 'market_crash';
+    const SCENARIOS = {
+      market_crash: { drop: -0.15, name: '市场暴跌' },
+      sector_shock: { drop: -0.25, name: '行业冲击' },
+      black_swan: { drop: -0.40, name: '黑天鹅' },
+      liquidity: { drop: -0.08, name: '流动性收紧' }
+    };
+    const s = SCENARIOS[scenario] || SCENARIOS.market_crash;
+    const rows = (await env.DB.prepare('SELECT * FROM agent_positions').all()).results || [];
+    let totalValue = 0;
+    rows.forEach(function (r) { totalValue += (r.current_price || 0) * (r.shares || 0); });
+    const loss = totalValue * s.drop;
     return new Response(JSON.stringify({
-      scenario,
-      results: { maxDrawdown: -0.25, var95: -0.08, worstCase: -0.35, recoveryTime: '120天', expectedImpact: '中度' },
-      lastUpdate: new Date().toLocaleString('zh-CN')
+      scenario, scenarioName: s.name,
+      results: {
+        holdingsValue: +totalValue.toFixed(2),
+        simulatedLoss: +loss.toFixed(2),
+        lossPct: (s.drop * 100).toFixed(1) + '%',
+        affectedHoldings: rows.length
+      },
+      lastUpdate: new Date().toLocaleString('zh-CN'),
+      source: 'real-positions'
     }), { headers: { ...headers, 'Content-Type': 'application/json' } });
   }
+
   return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
 }

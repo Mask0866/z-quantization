@@ -1,26 +1,59 @@
+/**
+ * 新闻数据 API（真实数据：新浪财经 7x24，经定时爬取入 D1，保留 48h）
+ * - GET /api/news             新闻列表（按时间倒序）
+ * - GET /api/news/sentiment?code=  情感统计（关键词规则对真实文本计算）
+ */
+import { sentimentOf, categoryOf } from '../lib/crawl.js';
+
+const headers = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+};
+
 export async function onRequest(context) {
   const { request, env } = context;
   const url = new URL(request.url);
   const method = request.method;
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
   if (method === 'OPTIONS') return new Response(null, { headers });
-  if (url.pathname === '/api/news') {
+
+  /* GET /api/news */
+  if (url.pathname === '/api/news' && method === 'GET') {
+    const rows = (await env.DB.prepare(
+      "SELECT * FROM news_data WHERE timestamp >= datetime('now', '-2 days') ORDER BY timestamp DESC LIMIT 100"
+    ).all()).results || [];
     return new Response(JSON.stringify({
-      news: [
-        { id: 1, time: '2026-08-27 10:30:00', title: '央行宣布降准0.25个百分点', content: '中国人民银行宣布决定下调金融机构存款准备金率0.25个百分点...', sources: ['央行', '财联社'], sentiment: 1, stocks: ['000001', '399001'], category: 'macro' },
-        { id: 2, time: '2026-08-27 09:45:00', title: '某科技巨头发布新款AI芯片', content: '今日发布新一代AI训练芯片，性能提升30%...', sources: ['雪球', '财联社'], sentiment: 1, stocks: ['300750'], category: 'tech' },
-        { id: 3, time: '2026-08-27 09:00:00', title: '某光伏企业业绩预减50%', content: '公司预计上半年净利润同比下降50%左右...', sources: ['巨潮资讯'], sentiment: -1, stocks: ['601012'], category: 'earnings' },
-      ],
-      lastUpdate: new Date().toLocaleString('zh-CN')
+      news: rows.map(function (r, i) {
+        return {
+          id: r.id, time: r.timestamp, title: r.title, content: r.content || '',
+          sentiment: r.sentiment, category: r.category || 'macro',
+          sources: r.sources ? JSON.parse(r.sources) : [], stocks: r.stocks ? JSON.parse(r.stocks) : []
+        };
+      }),
+      lastUpdate: rows.length ? rows[0].timestamp : ''
     }), { headers: { ...headers, 'Content-Type': 'application/json' } });
   }
-  if (url.pathname === '/api/news/sentiment') {
-    const code = url.searchParams.get('code');
-    return new Response(JSON.stringify({ code, sentiment: 0.65, positive: 65, negative: 20, neutral: 15, newsCount: 42, lastUpdate: new Date().toLocaleString('zh-CN') }), { headers: { ...headers, 'Content-Type': 'application/json' } });
+
+  /* GET /api/news/sentiment?code= */
+  if (url.pathname === '/api/news/sentiment' && method === 'GET') {
+    const code = url.searchParams.get('code') || '';
+    const rows = (await env.DB.prepare(
+      "SELECT * FROM news_data WHERE timestamp >= datetime('now', '-2 days')"
+    ).all()).results || [];
+    let pos = 0, neg = 0, neu = 0;
+    rows.forEach(function (r) {
+      if (r.sentiment > 0) pos++;
+      else if (r.sentiment < 0) neg++;
+      else neu++;
+    });
+    const total = rows.length || 1;
+    const score = total ? +((pos - neg) / total).toFixed(2) : 0;
+    return new Response(JSON.stringify({
+      code, sentiment: score,
+      positive: pos, negative: neg, neutral: neu, newsCount: rows.length,
+      lastUpdate: new Date().toLocaleString('zh-CN'), source: 'sina-7x24'
+    }), { headers: { ...headers, 'Content-Type': 'application/json' } });
   }
+
   return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
 }

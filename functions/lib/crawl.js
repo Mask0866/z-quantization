@@ -282,17 +282,6 @@ export async function fundPingzhong(fcode) {
       if (ac && ac.length) out.accNav = ac[ac.length - 1].y;
     } catch (e) { /* ignore */ }
   }
-  // 规模（Data_grandTotal，单位万元，取最后一条）
-  var gtStr = extractVar(text, 'Data_grandTotal');
-  if (gtStr) {
-    try {
-      var gt = JSON.parse(gtStr);
-      if (gt && gt.series && gt.series.length) {
-        var sd = gt.series[gt.series.length - 1].data || [];
-        if (sd.length) out.scaleWan = sd[sd.length - 1].y;   // 万元
-      }
-    } catch (e) { /* ignore */ }
-  }
   // 机构/个人持有占比（Data_holderStructure = {series:[{name:'机构持有比例',data:[...]},...],categories:[...]}）
   var hsStr = extractVar(text, 'Data_holderStructure');
   if (hsStr) {
@@ -300,8 +289,8 @@ export async function fundPingzhong(fcode) {
       var hs = JSON.parse(hsStr);
       if (hs && hs.series && hs.series.length) {
         var inst = hs.series.filter(function (s) { return (s.name || '').indexOf('机构') >= 0; })[0];
-        var data = inst ? inst.data : (hs.series[0] && hs.series[0].data);
-        if (data && data.length) out.instPct = data[data.length - 1];
+        var hdata = inst ? inst.data : (hs.series[0] && hs.series[0].data);
+        if (hdata && hdata.length) out.instPct = hdata[hdata.length - 1];
       }
     } catch (e) { /* ignore */ }
   }
@@ -310,7 +299,7 @@ export async function fundPingzhong(fcode) {
   if (scStr) {
     try { out.stocks = JSON.parse(scStr); } catch (e) { out.stocks = []; }
   }
-  out.scale = out.scaleWan != null ? +(out.scaleWan / 10000).toFixed(2) : null;   // 亿元
+  out.scale = null;   // 规模以 fundMobileBasic().scale（份额×净值）为准
   return out;
 }
 
@@ -332,8 +321,8 @@ export async function sinaNews7x24(pageSize) {
       id: it.id,
       title: t.length > 60 ? t.slice(0, 60) + '…' : t,
       content: t,
-      time: it.create_time ? new Date(it.create_time * 1000).toLocaleString('zh-CN', { hour12: false }) : '',
-      ts: it.create_time ? it.create_time * 1000 : null,
+      time: it.create_time || '',
+      ts: it.create_time ? new Date(it.create_time.replace(/-/g, '/')).getTime() : null,
       source: (it.source && it.source.name) || '新浪财经'
     };
   }).filter(function (it) { return it.title; });

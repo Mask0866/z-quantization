@@ -1,4 +1,4 @@
--- 市场数据表
+-- 市场数据表（真实数据：腾讯行情；type: index/stock/etf）
 CREATE TABLE IF NOT EXISTS market_data (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   type TEXT NOT NULL,  -- 'index', 'stock', 'etf'
@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS market_data (
   chg_pct REAL,
   volume REAL,
   amount REAL,
+  turnover REAL,      -- 换手率 %
+  vr REAL,            -- 量比
+  mkt_cap REAL,       -- 总市值（亿）
   timestamp TEXT NOT NULL,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -72,6 +75,38 @@ CREATE TABLE IF NOT EXISTS factor_data (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 场外主动基金数据表（真实数据：天天基金；20 只候选池）
+CREATE TABLE IF NOT EXISTS fund_offsite (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  nav REAL,
+  nav_date TEXT,
+  chg_pct REAL,
+  acc_nav REAL,
+  scale REAL,           -- 规模（亿）= 份额×净值
+  mgr TEXT,             -- 基金经理（逗号分隔）
+  estab_date TEXT,
+  yoy REAL,             -- 成立年限（年）
+  inst_pct REAL,        -- 机构持有占比 %
+  syl_1m REAL, syl_3m REAL, syl_6m REAL, syl_1y REAL,
+  buy_state TEXT,
+  timestamp TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 基金经理聚合表（从场外基金聚合）
+CREATE TABLE IF NOT EXISTS fund_managers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  codes TEXT,           -- 管理基金 "code|name;..."
+  count INTEGER,
+  scale REAL,           -- 合计管理规模（亿）
+  avg_yoy REAL,         -- 平均任职年限
+  updated_at TEXT NOT NULL,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 设置表
 CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
@@ -94,7 +129,17 @@ CREATE INDEX IF NOT EXISTS idx_market_type ON market_data(type);
 CREATE INDEX IF NOT EXISTS idx_market_code ON market_data(code);
 CREATE INDEX IF NOT EXISTS idx_market_timestamp ON market_data(timestamp);
 CREATE INDEX IF NOT EXISTS idx_fund_code ON fund_data(code);
+CREATE INDEX IF NOT EXISTS idx_fund_offsite_code ON fund_offsite(code);
+CREATE INDEX IF NOT EXISTS idx_fund_offsite_ts ON fund_offsite(timestamp);
+CREATE INDEX IF NOT EXISTS idx_fund_mgr_name ON fund_managers(name);
 CREATE INDEX IF NOT EXISTS idx_news_timestamp ON news_data(timestamp);
 CREATE INDEX IF NOT EXISTS idx_news_sentiment ON news_data(sentiment);
 CREATE INDEX IF NOT EXISTS idx_factor_code ON factor_data(code);
 CREATE INDEX IF NOT EXISTS idx_sync_log_created ON sync_log(created_at);
+
+-- 清空历史虚拟数据（2026-08-28 接入真实数据源；agent_positions 为模拟盘持仓，保留）
+DELETE FROM market_data;
+DELETE FROM fund_data;
+DELETE FROM news_data;
+DELETE FROM factor_data;
+DELETE FROM sync_log;
